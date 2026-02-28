@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -29,8 +30,12 @@ const (
 )
 
 type Server struct {
-	cfg     config.Config
-	router  *router.Router
+	cfgMu sync.RWMutex
+	cfg   config.Config
+
+	routerMu sync.RWMutex
+	router   *router.Router
+
 	app     *echo.Echo
 	address string
 }
@@ -77,12 +82,12 @@ func New(cfg config.Config, rt *router.Router) (*Server, error) {
 	}))
 
 	srv := &Server{
-		cfg:     cfg,
-		router:  rt,
 		app:     e,
 		address: fmt.Sprintf(":%d", cfg.Server.Port),
 	}
 
+	srv.setConfig(cfg)
+	srv.setRouter(rt)
 	srv.registerRoutes()
 
 	return srv, nil
@@ -90,7 +95,7 @@ func New(cfg config.Config, rt *router.Router) (*Server, error) {
 
 // Run starts the HTTP server and blocks until the context is cancelled.
 func (s *Server) Run(ctx context.Context) error {
-	printStartupBanner(s.cfg.Server.Port)
+	printStartupBanner(s.port())
 	slog.Info("starting server", "addr", s.address)
 
 	httpServer := &http.Server{
@@ -142,7 +147,16 @@ func (s *Server) handleChatCompletions(c echo.Context) error {
 	ctx := c.Request().Context()
 	unifiedReq := req.ToUnified()
 
-	resp, modelInfo, err := s.router.Chat(ctx, unifiedReq)
+	rt := s.currentRouter()
+	if rt == nil {
+		return requestError{
+			Status:  http.StatusServiceUnavailable,
+			Message: "router not initialised",
+			Type:    "server_error",
+		}
+	}
+
+	resp, modelInfo, err := rt.Chat(ctx, unifiedReq)
 	if err != nil {
 		return toHTTPError(err)
 	}
@@ -167,7 +181,16 @@ func (s *Server) handleCompletions(c echo.Context) error {
 	ctx := c.Request().Context()
 	unifiedReq := req.ToUnified()
 
-	resp, modelInfo, err := s.router.Completion(ctx, unifiedReq)
+	rt := s.currentRouter()
+	if rt == nil {
+		return requestError{
+			Status:  http.StatusServiceUnavailable,
+			Message: "router not initialised",
+			Type:    "server_error",
+		}
+	}
+
+	resp, modelInfo, err := rt.Completion(ctx, unifiedReq)
 	if err != nil {
 		return toHTTPError(err)
 	}
@@ -194,7 +217,16 @@ func (s *Server) handleClaudeMessages(c echo.Context) error {
 	unifiedReq := req.ToUnified()
 	unifiedReq.Stream = false
 
-	resp, modelInfo, err := s.router.Chat(ctx, unifiedReq)
+	rt := s.currentRouter()
+	if rt == nil {
+		return requestError{
+			Status:  http.StatusServiceUnavailable,
+			Message: "router not initialised",
+			Type:    "server_error",
+		}
+	}
+
+	resp, modelInfo, err := rt.Chat(ctx, unifiedReq)
 	if err != nil {
 		return toHTTPError(err)
 	}
@@ -212,6 +244,45 @@ func (s *Server) handleClaudeMessages(c echo.Context) error {
 
 	claudeResp := translator.FromUnifiedClaude(modelInfo.ID, resp)
 	return c.JSON(http.StatusOK, claudeResp)
+}
+
+func (s *Server) setRouter(rt *router.Router) {
+	s.routerMu.Lock()
+	defer s.routerMu.Unlock()
+	s.router = rt
+}
+
+func (s *Server) currentRouter() *router.Router {
+	s.routerMu.RLock()
+	defer s.routerMu.RUnlock()
+	return s.router
+}
+
+func (s *Server) setConfig(cfg config.Config) {
+	s.cfgMu.Lock()
+	defer s.cfgMu.Unlock()
+	s.cfg = cfg
+}
+
+func (s *Server) port() int {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	return s.cfg.Server.Port
+}
+
+// UpdateRouting atomically swaps the server's active configuration and router.
+func (s *Server) UpdateRouting(cfg config.Config, rt *router.Router) {
+	currentPort := s.port()
+	if cfg.Server.Port != currentPort {
+		slog.Warn("config reload attempted to change port; keeping existing listener",
+			"current_port", currentPort,
+			"requested_port", cfg.Server.Port,
+		)
+		cfg.Server.Port = currentPort
+	}
+
+	s.setConfig(cfg)
+	s.setRouter(rt)
 }
 
 func decodeRequestBody[T any](c echo.Context, target *T) error {

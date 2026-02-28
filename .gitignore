@@ -25,4 +25,4 @@ vendor/
 .DS_Store
 Thumbs.db
 .CODEX.md
-config*
+config.yaml

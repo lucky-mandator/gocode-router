@@ -29,6 +29,10 @@ Welcome to the extremely professional API router that thinks it's a barista. Ord
 - `aliases` – expose vanity model names that forward to a real provider ID.
 - Extra headers? Sprinkle them under `headers:` and we send them on every request.
 
+## Hot Reload Vibes
+- The binary polls your config every couple of seconds; tweak YAML and it re-wires providers without a restart.
+- Passed `--port`? We keep that override even if the file begs otherwise—consistency over chaos.
+
 ## Talking To It
 Point your favorite SDK/cli at `http://localhost:<port>` and keep using the usual `/v1/chat/completions` endpoint. Requests are translated on the fly before being handed to the real provider you configured.
 
