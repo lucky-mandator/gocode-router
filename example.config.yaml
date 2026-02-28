@@ -1,0 +1,30 @@
+server:
+  port: 8080
+
+providers:
+  openai:
+    api_key: "sk-openai"
+    base_url: "https://api.openai.com/v1"
+    models:
+      - id: gpt-4o
+        api_style: openai
+    headers: {}
+
+  claude:
+    api_key: "sk-claude"
+    base_url: "https://api.anthropic.com"
+    models:
+      - id: claude-3-sonnet
+        api_style: claude
+    headers: {}
+
+  nvidia:
+    api_key: "nvapi"
+    base_url: "https://integrate.api.nvidia.com/v1"
+    headers:
+      NVCF-AI-Resource: "moonshotai/kimi-k2.5"
+    models:
+      - id: moonshotai/kimi-k2.5
+        api_style: openai
+    aliases:
+      claude-sonnet-4-6: moonshotai/kimi-k2.5
